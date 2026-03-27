@@ -1,0 +1,19 @@
+[package]
+name = "tcs"
+version = "0.1.0"
+edition = "2024"
+description = "tmux-claude-session: TUI for managing git worktree + tmux + Claude Code sessions"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+ratatui = "0.29"
+nucleo-matcher = "0.3"
+tokei = "12"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+dirs = "6"
+anyhow = "1"
+scopeguard = "1.2.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
