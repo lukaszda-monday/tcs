@@ -46,6 +46,15 @@ impl Output {
         ]));
     }
 
+    /// `  ❯ label: value` — green arrow, cyan label, regular value
+    pub fn done_label(&mut self, label: &str, value: &str) {
+        self.print(Line::from(vec![
+            Span::styled("  \u{276f} ", Style::default().fg(Color::Green)),
+            Span::styled(format!("{label}: "), Style::default().fg(Color::Cyan)),
+            Span::raw(value.to_string()),
+        ]));
+    }
+
     /// `  ❯ label: value` — green arrow, cyan label, bold value
     pub fn done_val(&mut self, label: &str, value: &str) {
         self.print(Line::from(vec![

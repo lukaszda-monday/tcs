@@ -104,21 +104,23 @@ fn run_cleanup(worktree: &str, repo: &str, branch: &str) -> Result<()> {
 
     match action {
         tui::cleanup::CleanupAction::Keep => {
-            out.done(&format!("Worktree kept at: {}", worktree_dir.display()));
+            out.done_label("Git", &format!("Worktree kept at: {}", worktree_dir.display()));
         }
         tui::cleanup::CleanupAction::Remove => {
             kill_other_panes();
+            out.done_label("Git", &format!("Removing worktree at {} ...", worktree_dir.display()));
             git::remove_worktree(&repo_dir, &worktree_dir)
                 .context("failed to remove worktree")?;
-            out.done("Worktree removed.");
+            out.done_label("Git", "Worktree removed.");
         }
         tui::cleanup::CleanupAction::RemoveAndDeleteBranch => {
             kill_other_panes();
+            out.done_label("Git", &format!("Removing worktree at {} ...", worktree_dir.display()));
             git::remove_worktree(&repo_dir, &worktree_dir)
                 .context("failed to remove worktree")?;
-            out.done("Worktree removed.");
+            out.done_label("Git", "Worktree removed.");
             if git::delete_branch(&repo_dir, branch)? {
-                out.done(&format!("Branch '{branch}' deleted."));
+                out.done_label("Git", &format!("Branch '{branch}' deleted."));
             } else {
                 out.error("Could not delete branch.");
             }
@@ -202,17 +204,17 @@ fn run_main(cli: Cli) -> Result<()> {
 
     // Pull base branch if requested (before creating worktree)
     if selection.pull_base {
-        out.done(&format!("Pulling {} ...", selection.base));
+        out.done_label("Git", &format!("Pulling {} ...", selection.base));
         git::pull_ref(&repo).context("failed to pull base branch")?;
     }
 
     // Create worktree
     let wt_msg = git::create_worktree(&repo, &worktree_dir, &selection.branch, &selection.base)
         .context("failed to create worktree")?;
-    out.done(&wt_msg);
+    out.done_label("Git", &wt_msg);
 
     // Detect language only if it could influence the setup command
-    let detected_lang = if cfg.repos.contains_key(&repo_name) || cfg.languages.is_empty() {
+    let detected_lang = if cfg.repos.setup.contains_key(&repo_name) || cfg.languages.setup.is_empty() {
         None
     } else {
         lang::detect(&worktree_dir)
