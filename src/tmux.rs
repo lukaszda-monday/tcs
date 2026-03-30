@@ -96,7 +96,7 @@ pub fn session_name(repo_name: &str, branch: &str) -> String {
 /// Build the window title. Uses `/` as separator to avoid
 /// conflicting with tmux's `session:window` target syntax.
 pub fn window_title(repo_name: &str, branch: &str) -> String {
-    format!("{repo_name}/{branch}")
+    format!("{repo_name}:{branch}")
 }
 
 /// Write the inner script that runs inside the tmux pane.
@@ -247,7 +247,7 @@ pub fn launch(
                     &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, window_title, &wt)?;
+            configure_session_panes(session_name, &wt)?;
             // Open ghostty
             let child = Command::new("ghostty")
                 .args(["-e", "tmux", "attach-session", "-t", &format!("={session_name}")])
@@ -262,7 +262,7 @@ pub fn launch(
                     "-n", window_title, "-c", &wt, &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, window_title, &wt)?;
+            configure_session_panes(session_name, &wt)?;
             let cmd = if inside_tmux() { "switch-client" } else { "attach-session" };
             Command::new("tmux")
                 .args([cmd, "-t", &format!("={session_name}")])
@@ -276,10 +276,10 @@ pub fn launch(
 /// Configure panes for session/ghostty mode (split, nvim, pane titles, etc.)
 fn configure_session_panes(
     session_name: &str,
-    window_title: &str,
     worktree_dir: &str,
 ) -> Result<()> {
-    let target = format!("={session_name}:{window_title}");
+    // Use window index 0 instead of name to avoid : ambiguity in tmux targets
+    let target = format!("={session_name}:0");
 
     // Tag claude pane with custom user option
     Command::new("tmux")
