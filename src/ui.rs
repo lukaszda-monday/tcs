@@ -38,13 +38,6 @@ impl Output {
         self.print(Line::from(""));
     }
 
-    /// `  ❯ message` — green arrow, regular text
-    pub fn done(&mut self, msg: &str) {
-        self.print(Line::from(vec![
-            Span::styled("  \u{276f} ", Style::default().fg(Color::Green)),
-            Span::raw(msg.to_string()),
-        ]));
-    }
 
     /// `  ❯ label: value` — green arrow, cyan label, regular value
     pub fn done_label(&mut self, label: &str, value: &str) {
