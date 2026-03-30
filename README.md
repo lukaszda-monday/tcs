@@ -6,11 +6,13 @@ Select a branch (fuzzy autocomplete with highlighting), create a worktree, launc
 
 ## Install
 
-Requires [Rust](https://rustup.rs/), `git`, `tmux`, `nvim`
-
+1. Install git, tmux, nvim if you don't have them already
+2. Install [Rust via rustup](https://rustup.rs/)
+3. Run the following in repo root to install:
 ```bash
 cargo install --path .
 ```
+4. Now you can run `tcs` from anywhere :)
 
 ## Usage
 
