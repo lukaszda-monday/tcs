@@ -117,20 +117,15 @@ pub fn write_inner_script(
     let worktree_str = worktree_dir.to_string_lossy();
     let repo_str = repo_dir.to_string_lossy();
 
-    let setup_block = if let Some(cmd) = setup_cmd {
+    let setup_split = if let Some(cmd) = setup_cmd {
         format!(
             r#"
-echo ""
-echo -e "\033[0;36m▸\033[0m Running setup: {cmd}"
-echo ""
-{cmd}
-SETUP_EXIT=$?
-if [ $SETUP_EXIT -ne 0 ]; then
-    echo ""
-    echo -e "\033[0;31m✗ Setup failed (exit $SETUP_EXIT)\033[0m"
-    echo ""
-fi
-"#
+# Run setup in a horizontal split pane (auto-closes when done)
+tmux split-window -v -l 30% -c {worktree_quoted} '{cmd} && exit 0 || exec $SHELL'
+tmux set-option -p @tcs "setup"
+tmux select-pane -t 0
+"#,
+            worktree_quoted = shell_quote(&worktree_str),
         )
     } else {
         String::new()
@@ -148,9 +143,8 @@ echo -e "\033[0;36m━━━━━━━━━━━━━━━━━━━━�
 echo -e " \033[1mWorktree\033[0m  {worktree_str}"
 echo -e " \033[1mBranch\033[0m    $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '???')"
 echo -e "\033[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-{setup_block}
 echo ""
-
+{setup_split}
 # Run Claude Code
 {claude_cmd}
 
@@ -190,7 +184,6 @@ pub fn launch(
 ) -> Result<()> {
     let wt = worktree_dir.to_string_lossy();
     let script = inner_script.to_string_lossy();
-    let pane_title = format!("claude \u{25b8} {window_title}");
 
     match mode {
         Mode::Tab => {
@@ -208,13 +201,17 @@ pub fn launch(
             if !status.success() {
                 bail!("failed to create tmux window");
             }
-            // Set pane title for the claude pane
+            // Tag claude pane with custom user option (immune to app overrides)
             Command::new("tmux")
-                .args(["select-pane", "-T", &pane_title])
+                .args(["set-option", "-p", "@tcs", "claude-master-agent"])
                 .status()?;
             // Split right pane with nvim
             Command::new("tmux")
                 .args(["split-window", "-h", "-c", &wt, &format!("nvim {}", shell_quote(&wt))])
+                .status()?;
+            // Tag nvim pane
+            Command::new("tmux")
+                .args(["set-option", "-p", "@tcs", "nvim"])
                 .status()?;
             // Select left pane (claude pane)
             Command::new("tmux")
@@ -227,9 +224,12 @@ pub fn launch(
             Command::new("tmux")
                 .args(["set-option", "-w", "automatic-rename", "off"])
                 .status()?;
-            // Show pane borders with titles
+            // Show pane borders — use @tcs if set, otherwise pane_title
             Command::new("tmux")
                 .args(["set-option", "-w", "pane-border-status", "top"])
+                .status()?;
+            Command::new("tmux")
+                .args(["set-option", "-w", "pane-border-format", " #{?@tcs,#{@tcs},#{pane_title}} "])
                 .status()?;
         }
         Mode::Ghostty => {
@@ -247,7 +247,7 @@ pub fn launch(
                     &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, window_title, &wt, &pane_title)?;
+            configure_session_panes(session_name, window_title, &wt)?;
             // Open ghostty
             let child = Command::new("ghostty")
                 .args(["-e", "tmux", "attach-session", "-t", &format!("={session_name}")])
@@ -262,7 +262,7 @@ pub fn launch(
                     "-n", window_title, "-c", &wt, &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, window_title, &wt, &pane_title)?;
+            configure_session_panes(session_name, window_title, &wt)?;
             let cmd = if inside_tmux() { "switch-client" } else { "attach-session" };
             Command::new("tmux")
                 .args([cmd, "-t", &format!("={session_name}")])
@@ -278,53 +278,40 @@ fn configure_session_panes(
     session_name: &str,
     window_title: &str,
     worktree_dir: &str,
-    pane_title: &str,
 ) -> Result<()> {
     let target = format!("={session_name}:{window_title}");
 
-    // Set pane title for claude pane
+    // Tag claude pane with custom user option
     Command::new("tmux")
-        .args(["select-pane", "-t", &format!("{target}.0"), "-T", pane_title])
+        .args(["set-option", "-p", "-t", &format!("{target}.0"), "@tcs", "claude-master-agent"])
         .status()?;
     // Split right pane with nvim
     Command::new("tmux")
         .args([
-            "split-window",
-            "-h",
-            "-c",
-            worktree_dir,
-            "-t",
-            &target,
+            "split-window", "-h", "-c", worktree_dir, "-t", &target,
             &format!("nvim {}", shell_quote(worktree_dir)),
         ])
+        .status()?;
+    // Tag nvim pane
+    Command::new("tmux")
+        .args(["set-option", "-p", "@tcs", "nvim"])
         .status()?;
     // Select left pane
     Command::new("tmux")
         .args(["select-pane", "-t", &format!("{target}.0")])
         .status()?;
-    // Lock window name and show pane borders
+    // Lock window name, show pane borders with @tcs label
     Command::new("tmux")
         .args(["set-option", "-w", "-t", &target, "allow-rename", "off"])
         .status()?;
     Command::new("tmux")
-        .args([
-            "set-option",
-            "-w",
-            "-t",
-            &target,
-            "automatic-rename",
-            "off",
-        ])
+        .args(["set-option", "-w", "-t", &target, "automatic-rename", "off"])
         .status()?;
     Command::new("tmux")
-        .args([
-            "set-option",
-            "-w",
-            "-t",
-            &target,
-            "pane-border-status",
-            "top",
-        ])
+        .args(["set-option", "-w", "-t", &target, "pane-border-status", "top"])
+        .status()?;
+    Command::new("tmux")
+        .args(["set-option", "-w", "-t", &target, "pane-border-format", " #{?@tcs,#{@tcs},#{pane_title}} "])
         .status()?;
 
     Ok(())

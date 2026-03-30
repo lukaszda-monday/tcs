@@ -157,7 +157,7 @@ pub fn create_worktree(
     base: &str,
 ) -> Result<String> {
     if worktree_dir.exists() {
-        return Ok(format!("reusing existing worktree at {}", worktree_dir.display()));
+        return Ok(format!("Reusing existing worktree at {}", worktree_dir.display()));
     }
 
     if let Some(parent) = worktree_dir.parent() {
@@ -169,13 +169,13 @@ pub fn create_worktree(
 
     if branch_exists(repo, branch)? {
         git_run(&["-C", &repo_str, "worktree", "add", &wt_str, branch])?;
-        Ok(format!("checked out existing branch '{branch}'"))
+        Ok(format!("Checked out existing branch '{branch}'"))
     } else if let Some(remote_ref) = find_remote_branch(repo, branch)? {
         git_run(&["-C", &repo_str, "worktree", "add", "--track", "-b", branch, &wt_str, &remote_ref])?;
-        Ok(format!("tracking remote branch '{remote_ref}'"))
+        Ok(format!("Tracking remote branch '{remote_ref}'"))
     } else {
         git_run(&["-C", &repo_str, "worktree", "add", "--no-track", "-b", branch, &wt_str, base])?;
-        Ok(format!("created new branch '{branch}' from {base}"))
+        Ok(format!("Created new branch '{branch}' from {base}"))
     }
 }
 
