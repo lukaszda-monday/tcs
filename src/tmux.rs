@@ -121,11 +121,12 @@ pub fn write_inner_script(
         format!(
             r#"
 # Run setup in a horizontal split pane (auto-closes when done)
-tmux split-window -v -l 30% -c {worktree_quoted} '{cmd} && exit 0 || exec $SHELL'
+tmux split-window -v -l 30% -c {worktree_quoted} "$SHELL -lc {cmd_quoted} && exit 0 || exec $SHELL"
 tmux set-option -p @tcs "setup"
 tmux select-pane -t 0
 "#,
             worktree_quoted = shell_quote(&worktree_str),
+            cmd_quoted = shell_quote(cmd),
         )
     } else {
         String::new()
