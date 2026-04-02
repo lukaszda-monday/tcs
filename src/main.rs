@@ -221,12 +221,39 @@ fn run_main(cli: Cli) -> Result<()> {
     };
     let setup_cmd = cfg.setup_command(&repo_name, detected_lang.as_deref());
 
+    // Check if nvm is needed: node-ish language + .nvmrc present
+    const NODE_LANGS: &[&str] = &["tsx", "jsx", "javascript", "typescript"];
+    let is_node = detected_lang.as_deref().is_some_and(|l| NODE_LANGS.contains(&l));
+    let nvmrc_path = worktree_dir.join(".nvmrc");
+    let use_nvm = is_node && nvmrc_path.exists();
+
+    if use_nvm {
+        let required_version = std::fs::read_to_string(&nvmrc_path)
+            .context("failed to read .nvmrc")?
+            .trim()
+            .to_string();
+        let nvm_check = std::process::Command::new("bash")
+            .args(["-c", &format!(
+                "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm ls {} >/dev/null 2>&1",
+                shell_quote(&required_version)
+            )])
+            .status();
+        if !nvm_check.is_ok_and(|s| s.success()) {
+            out.error(&format!(
+                "Node {} (from .nvmrc) is not installed. Run: nvm install {}",
+                required_version, required_version
+            ));
+            return Ok(());
+        }
+        out.done_label("nvm", &format!("Node {required_version} (from .nvmrc)"));
+    }
+
     if let Some(ref cmd) = setup_cmd {
         out.done_val("Setup", &format!("{cmd} (in tmux)"));
     }
 
     // Build claude command
-    let claude_cmd = if cli.claude_args.is_empty() {
+    let mut claude_cmd = if cli.claude_args.is_empty() {
         cfg.command.clone()
     } else {
         format!(
@@ -239,6 +266,9 @@ fn run_main(cli: Cli) -> Result<()> {
                 .join(" ")
         )
     };
+    if selection.skip_permissions {
+        claude_cmd.push_str(" --dangerously-skip-permissions");
+    }
 
     let tcs_bin = std::env::current_exe()?
         .to_string_lossy()
@@ -251,6 +281,7 @@ fn run_main(cli: Cli) -> Result<()> {
         &claude_cmd,
         setup_cmd.as_deref(),
         &tcs_bin,
+        use_nvm,
     )?;
 
     let mode_str = match mode {

@@ -108,6 +108,7 @@ pub fn write_inner_script(
     claude_cmd: &str,
     setup_cmd: Option<&str>,
     tcs_bin: &str,
+    use_nvm: bool,
 ) -> Result<std::path::PathBuf> {
     let tmp = std::env::temp_dir().join(format!(
         "tcs-inner-{}.sh",
@@ -117,20 +118,39 @@ pub fn write_inner_script(
     let worktree_str = worktree_dir.to_string_lossy();
     let repo_str = repo_dir.to_string_lossy();
 
+    // Setup pane: prepend "nvm use &&" before cmd, then quote the whole thing
     let setup_split = if let Some(cmd) = setup_cmd {
+        let inner = if use_nvm {
+            format!("nvm use && {cmd} && exit; exec zsh")
+        } else {
+            format!("{cmd} && exit; exec zsh")
+        };
         format!(
             r#"
-# Run setup in a horizontal split pane (auto-closes when done)
-tmux split-window -v -l 30% -c {worktree_quoted} "$SHELL -lc {cmd_quoted} && exit 0 || exec $SHELL"
+# Run setup in a horizontal split pane (auto-closes on success, interactive shell on failure)
+tmux split-window -v -l 30% -c {worktree_quoted} "zsh -lic {cmd_quoted}"
 tmux set-option -p @tcs "setup"
 tmux select-pane -t 0
 "#,
             worktree_quoted = shell_quote(&worktree_str),
-            cmd_quoted = shell_quote(cmd),
+            cmd_quoted = shell_quote(&inner),
         )
     } else {
         String::new()
     };
+
+    // nvm block for the inner script (bash — source nvm directly)
+    let nvm_block = if use_nvm {
+        r#"
+# Load nvm and switch to .nvmrc version
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use
+"#
+    } else {
+        ""
+    };
+
 
     let script = format!(
         r#"#!/usr/bin/env bash
@@ -138,7 +158,7 @@ tmux select-pane -t 0
 rm -f "$0"
 
 cd {worktree_quoted} || exit 1
-
+{nvm_block}
 echo ""
 echo -e "\033[0;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
 echo -e " \033[1mWorktree\033[0m  {worktree_str}"
@@ -202,17 +222,23 @@ pub fn launch(
             if !status.success() {
                 bail!("failed to create tmux window");
             }
+            // Hide monday logo in all panes (including manually spawned ones)
+            Command::new("tmux")
+                .args(["set-environment", "MONDAY_HIDE_LOGO", "1"])
+                .status()?;
             // Tag claude pane with custom user option (immune to app overrides)
             Command::new("tmux")
                 .args(["set-option", "-p", "@tcs", "claude-master-agent"])
                 .status()?;
-            // Split right pane with nvim
+            // Split right pane, send nvim as keys so quitting nvim keeps the shell
             Command::new("tmux")
-                .args(["split-window", "-h", "-c", &wt, &format!("nvim {}", shell_quote(&wt))])
+                .args(["split-window", "-h", "-c", &wt])
                 .status()?;
-            // Tag nvim pane
             Command::new("tmux")
                 .args(["set-option", "-p", "@tcs", "nvim"])
+                .status()?;
+            Command::new("tmux")
+                .args(["send-keys", "nvim .", "Enter"])
                 .status()?;
             // Select left pane (claude pane)
             Command::new("tmux")
@@ -282,20 +308,23 @@ fn configure_session_panes(
     // Use window index 0 instead of name to avoid : ambiguity in tmux targets
     let target = format!("={session_name}:0");
 
+    // Hide monday logo in all panes
+    Command::new("tmux")
+        .args(["set-environment", "-t", session_name, "MONDAY_HIDE_LOGO", "1"])
+        .status()?;
     // Tag claude pane with custom user option
     Command::new("tmux")
         .args(["set-option", "-p", "-t", &format!("{target}.0"), "@tcs", "claude-master-agent"])
         .status()?;
-    // Split right pane with nvim
+    // Split right pane, send nvim as keys so quitting nvim keeps the shell
     Command::new("tmux")
-        .args([
-            "split-window", "-h", "-c", worktree_dir, "-t", &target,
-            &format!("nvim {}", shell_quote(worktree_dir)),
-        ])
+        .args(["split-window", "-h", "-c", worktree_dir, "-t", &target])
         .status()?;
-    // Tag nvim pane
     Command::new("tmux")
         .args(["set-option", "-p", "@tcs", "nvim"])
+        .status()?;
+    Command::new("tmux")
+        .args(["send-keys", "nvim .", "Enter"])
         .status()?;
     // Select left pane
     Command::new("tmux")
@@ -314,6 +343,5 @@ fn configure_session_panes(
     Command::new("tmux")
         .args(["set-option", "-w", "-t", &target, "pane-border-format", " #{?@tcs,#{@tcs},#{pane_title}} "])
         .status()?;
-
     Ok(())
 }

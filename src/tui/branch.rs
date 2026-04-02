@@ -26,6 +26,7 @@ pub struct BranchSelection {
     pub is_new: bool,
     pub base: String,
     pub pull_base: bool,
+    pub skip_permissions: bool,
 }
 
 /// Interactive branch selector with fuzzy autocomplete.
@@ -55,7 +56,7 @@ impl BranchSelector {
         let mut branch = String::new();
         let mut is_new = false;
         let mut base = self.default_base.clone();
-        let pull_base;
+        let mut pull_base = false;
 
         let mut matcher = Matcher::new(Config::DEFAULT);
 
@@ -208,12 +209,7 @@ impl BranchSelector {
                                         &self.default_base,
                                     ));
                                 } else {
-                                    return Ok(Some(BranchSelection {
-                                        branch,
-                                        is_new,
-                                        base,
-                                        pull_base: false,
-                                    }));
+                                    state = InputState::SkipPermissions(false);
                                 }
                             }
                         }
@@ -582,11 +578,124 @@ impl BranchSelector {
                                 );
                             })?;
 
+                            state = InputState::SkipPermissions(false);
+                        }
+                        Event::Key(KeyEvent {
+                            code: KeyCode::Left | KeyCode::Right | KeyCode::Tab,
+                            ..
+                        })
+                        | Event::Key(KeyEvent {
+                            code: KeyCode::Char(' '),
+                            ..
+                        }) => {
+                            *p = !*p;
+                        }
+                        Event::Key(KeyEvent {
+                            code: KeyCode::Char('y'),
+                            ..
+                        }) => {
+                            *p = true;
+                        }
+                        Event::Key(KeyEvent {
+                            code: KeyCode::Char('n'),
+                            ..
+                        }) => {
+                            *p = false;
+                        }
+                        _ => {}
+                    }
+                }
+                InputState::SkipPermissions(p) => {
+                    let val = *p;
+                    terminal.draw(|frame| {
+                        let area = frame.area();
+                        let input_area = Rect::new(area.x, area.y, area.width, 1);
+
+                        let mut spans: Vec<Span> = vec![
+                            Span::styled("  ", Style::default()),
+                            Span::styled("\u{26a0} ", Style::default().fg(Color::Yellow)),
+                            Span::styled("Skip permissions: ", Style::default().fg(Color::Yellow)),
+                        ];
+
+                        if val {
+                            spans.push(Span::styled(
+                                "yes",
+                                Style::default()
+                                    .fg(Color::Red)
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                            spans.push(Span::styled(
+                                " / no",
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        } else {
+                            spans.push(Span::styled(
+                                "yes / ",
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                            spans.push(Span::styled(
+                                "no",
+                                Style::default().add_modifier(Modifier::BOLD),
+                            ));
+                        }
+
+                        frame.render_widget(Paragraph::new(Line::from(spans)), input_area);
+                    })?;
+
+                    match event::read()? {
+                        Event::Key(KeyEvent {
+                            code: KeyCode::Esc, ..
+                        })
+                        | Event::Key(KeyEvent {
+                            code: KeyCode::Char('c'),
+                            modifiers: KeyModifiers::CONTROL,
+                            ..
+                        }) => {
+                            return Ok(None);
+                        }
+                        Event::Key(KeyEvent {
+                            code: KeyCode::Enter,
+                            ..
+                        }) => {
+                            let skip = *p;
+
+                            let mut line_spans: Vec<Span<'static>> = vec![
+                                Span::styled(
+                                    "  \u{2714} ",
+                                    Style::default().fg(Color::Green),
+                                ),
+                                Span::styled(
+                                    "Skip permissions: ",
+                                    Style::default().fg(Color::Yellow),
+                                ),
+                            ];
+                            if skip {
+                                line_spans.push(Span::styled(
+                                    "yes \u{26a0}",
+                                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                                ));
+                            } else {
+                                line_spans.push(Span::styled(
+                                    "no",
+                                    Style::default().add_modifier(Modifier::BOLD),
+                                ));
+                            }
+                            let line = Line::from(line_spans);
+
+                            terminal.insert_before(1, |buf| {
+                                let para = Paragraph::new(line.clone());
+                                para.render(
+                                    Rect::new(0, 0, buf.area.width, 1),
+                                    buf,
+                                );
+                            })?;
+
                             return Ok(Some(BranchSelection {
                                 branch,
                                 is_new,
                                 base,
                                 pull_base,
+                                skip_permissions: skip,
                             }));
                         }
                         Event::Key(KeyEvent {
@@ -623,6 +732,7 @@ enum InputState {
     Branch(FieldState),
     Base(FieldState),
     Pull { value: bool, base_name: String },
+    SkipPermissions(bool),
 }
 
 /// A suggestion with its matched character indices for highlighting.
