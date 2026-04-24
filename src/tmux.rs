@@ -2,6 +2,15 @@ use anyhow::{bail, Result};
 use std::path::Path;
 use std::process::Command;
 
+/// Wrapper used as tmux `default-command` when nvm is in play.
+/// Runs `nvm use` if a `.nvmrc` exists in the new pane's cwd, then execs
+/// an interactive zsh. No-op (other than ~50ms startup) outside node dirs.
+const NVM_DEFAULT_CMD: &str = r#"zsh -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; [ -f .nvmrc ] && nvm use 2>/dev/null; exec zsh -i'"#;
+
+/// Command for the nvim pane when nvm is in play. Equivalent to opening nvim
+/// inside an interactive shell with `nvm use` applied first.
+const NVM_NVIM_CMD: &str = r#"zsh -ic '[ -f .nvmrc ] && nvm use 2>/dev/null; nvim .; exec zsh -i'"#;
+
 /// Mode for launching the tmux session.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Mode {
@@ -202,6 +211,7 @@ pub fn launch(
     window_title: &str,
     worktree_dir: &Path,
     inner_script: &Path,
+    use_nvm: bool,
 ) -> Result<()> {
     let wt = worktree_dir.to_string_lossy();
     let script = inner_script.to_string_lossy();
@@ -226,20 +236,36 @@ pub fn launch(
             Command::new("tmux")
                 .args(["set-environment", "MONDAY_HIDE_LOGO", "1"])
                 .status()?;
+            // Auto-`nvm use` for any future pane in this session when .nvmrc is present.
+            if use_nvm {
+                Command::new("tmux")
+                    .args(["set-option", "default-command", NVM_DEFAULT_CMD])
+                    .status()?;
+            }
             // Tag claude pane with custom user option (immune to app overrides)
             Command::new("tmux")
                 .args(["set-option", "-p", "@tcs", "claude-master-agent"])
                 .status()?;
-            // Split right pane, send nvim as keys so quitting nvim keeps the shell
-            Command::new("tmux")
-                .args(["split-window", "-h", "-c", &wt])
-                .status()?;
-            Command::new("tmux")
-                .args(["set-option", "-p", "@tcs", "nvim"])
-                .status()?;
-            Command::new("tmux")
-                .args(["send-keys", "nvim .", "Enter"])
-                .status()?;
+            // Split right pane for nvim. With nvm, spawn explicitly so we don't
+            // race with default-command sourcing nvm before send-keys lands.
+            if use_nvm {
+                Command::new("tmux")
+                    .args(["split-window", "-h", "-c", &wt, NVM_NVIM_CMD])
+                    .status()?;
+                Command::new("tmux")
+                    .args(["set-option", "-p", "@tcs", "nvim"])
+                    .status()?;
+            } else {
+                Command::new("tmux")
+                    .args(["split-window", "-h", "-c", &wt])
+                    .status()?;
+                Command::new("tmux")
+                    .args(["set-option", "-p", "@tcs", "nvim"])
+                    .status()?;
+                Command::new("tmux")
+                    .args(["send-keys", "nvim .", "Enter"])
+                    .status()?;
+            }
             // Select left pane (claude pane)
             Command::new("tmux")
                 .args(["select-pane", "-t", "0"])
@@ -274,7 +300,7 @@ pub fn launch(
                     &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, &wt)?;
+            configure_session_panes(session_name, &wt, use_nvm)?;
             // Open ghostty
             let child = Command::new("ghostty")
                 .args(["-e", "tmux", "attach-session", "-t", &format!("={session_name}")])
@@ -289,7 +315,7 @@ pub fn launch(
                     "-n", window_title, "-c", &wt, &*script,
                 ])
                 .status()?;
-            configure_session_panes(session_name, &wt)?;
+            configure_session_panes(session_name, &wt, use_nvm)?;
             let cmd = if inside_tmux() { "switch-client" } else { "attach-session" };
             Command::new("tmux")
                 .args([cmd, "-t", &format!("={session_name}")])
@@ -304,6 +330,7 @@ pub fn launch(
 fn configure_session_panes(
     session_name: &str,
     worktree_dir: &str,
+    use_nvm: bool,
 ) -> Result<()> {
     // Use window index 0 instead of name to avoid : ambiguity in tmux targets
     let target = format!("={session_name}:0");
@@ -312,20 +339,36 @@ fn configure_session_panes(
     Command::new("tmux")
         .args(["set-environment", "-t", session_name, "MONDAY_HIDE_LOGO", "1"])
         .status()?;
+    // Auto-`nvm use` for any future pane in this session when .nvmrc is present.
+    if use_nvm {
+        Command::new("tmux")
+            .args(["set-option", "-t", session_name, "default-command", NVM_DEFAULT_CMD])
+            .status()?;
+    }
     // Tag claude pane with custom user option
     Command::new("tmux")
         .args(["set-option", "-p", "-t", &format!("{target}.0"), "@tcs", "claude-master-agent"])
         .status()?;
-    // Split right pane, send nvim as keys so quitting nvim keeps the shell
-    Command::new("tmux")
-        .args(["split-window", "-h", "-c", worktree_dir, "-t", &target])
-        .status()?;
-    Command::new("tmux")
-        .args(["set-option", "-p", "@tcs", "nvim"])
-        .status()?;
-    Command::new("tmux")
-        .args(["send-keys", "nvim .", "Enter"])
-        .status()?;
+    // Split right pane for nvim. With nvm, spawn explicitly so we don't race
+    // with default-command sourcing nvm before send-keys lands.
+    if use_nvm {
+        Command::new("tmux")
+            .args(["split-window", "-h", "-c", worktree_dir, "-t", &target, NVM_NVIM_CMD])
+            .status()?;
+        Command::new("tmux")
+            .args(["set-option", "-p", "@tcs", "nvim"])
+            .status()?;
+    } else {
+        Command::new("tmux")
+            .args(["split-window", "-h", "-c", worktree_dir, "-t", &target])
+            .status()?;
+        Command::new("tmux")
+            .args(["set-option", "-p", "@tcs", "nvim"])
+            .status()?;
+        Command::new("tmux")
+            .args(["send-keys", "nvim .", "Enter"])
+            .status()?;
+    }
     // Select left pane
     Command::new("tmux")
         .args(["select-pane", "-t", &format!("{target}.0")])

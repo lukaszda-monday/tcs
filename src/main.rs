@@ -293,7 +293,7 @@ fn run_main(cli: Cli) -> Result<()> {
 
     drop(out);
 
-    tmux::launch(mode, &session_name, &window_title, &worktree_dir, &inner_script)
+    tmux::launch(mode, &session_name, &window_title, &worktree_dir, &inner_script, use_nvm)
         .context("failed to launch tmux")?;
 
     Ok(())
